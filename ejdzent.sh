@@ -10,6 +10,7 @@ echo "skrypt uruchiomiiony"
 #host=$zabbix_host
 #key=$zabbix_key_name
 
+
 log_file="./logfile.log"
 
 log_with_timestamp() {
@@ -23,6 +24,10 @@ log_table_header() {
 log_table_row() {
   echo -e "$(date +"%Y-%m-%d %H:%M:%S")\t$file\t\t$size\t$md5" >> "$log_file"
 }
+
+# Inicjalizacja zmiennych
+last_summary_minute=-1
+
 while (( "$#" )); do
   case "$1" in
     --host|-h)
@@ -45,13 +50,55 @@ done
 
 touch "$log_file"
 
+check_md5_files() {
+    today=$(date +%Y_%m_%d)
+    folder="/home/daniel/dump"
+    pattern="dump_$today*"
+
+    while IFS= read -r -d '' file; do
+        if [[ "$file" != *.md5 ]]; then
+            md5_file="$file.md5"
+            if [[ -f $md5_file ]]; then
+                old_md5=$(cat "$md5_file")
+                current_md5=$(md5sum "$file" | awk '{print $1}')
+                if [[ "$old_md5" != "$current_md5" ]]; then
+                    log_with_timestamp "Błąd: MD5 dla pliku $file się różni. Stary MD5: $old_md5, Nowy MD5: $current_md5"
+                    echo "$current_md5" > "$md5_file"  # Nadpisuje stary plik MD5 nową wartością
+                    log_with_timestamp "Zaktualizowano plik MD5 dla: $file"
+                else
+                    log_with_timestamp "MD5 dla pliku $file się nie różni. MD5: $old_md5"
+                fi
+            else
+                # Jeśli plik MD5 nie istnieje, tworzy nowy
+                echo "$current_md5" > "$md5_file"
+                log_with_timestamp "Utworzono nowy plik MD5 dla: $file"
+            fi
+        fi
+    done < <(find "$folder" -maxdepth 1 -type f -name "$pattern" ! -name "*.md5" -print0)
+}
+
+
+last_summary_minute=-1
+md5_check_counter=0
+main_operations_counter=0
+
+
 while true; do
+    current_minute=$(date +"%M")
 
     total_files=0
     total_size=0
     total_deletions=0
     total_md5_creations=0
     total_zabbix_send=0
+
+    if [ $md5_check_counter -eq 0 ]; then
+        check_md5_files
+    fi
+
+    if [ $main_operations_counter -eq 0 ]; then
+
+
 
     today=$(date +%Y_%m_%d)
     folder="/home/daniel/dump"
@@ -66,10 +113,10 @@ while true; do
     done
     echo "=========================koniec usuwania====================================" >> "$log_file"
 
-    files=(/home/daniel/dump/dump_$today* ! -name "*.md5")
+    files=( $(find $folder -maxdepth 1 -name "dump_$today*" ! -name "*.md5") )
 
     for file in "${files[@]}"; do
-        if [ -f "$file" ] && [[ ! "$file" == *.md5 ]]; then
+        if [ -f "$file" ]; then
             size=$(stat -c%s "$file")
             md5=$(md5sum "$file" | awk '{print $1}')
             md5_file="$file.md5"
@@ -90,7 +137,6 @@ while true; do
     done
     echo "=========================koniec md5====================================" >> "$log_file"
 
-
     find "$folder" -maxdepth 1 -name "$pattern.md5" -type f | while read -r md5_file; do
         main_file="${md5_file%.md5}"
         if [ ! -f "$main_file" ]; then
@@ -100,7 +146,6 @@ while true; do
         fi
     done
     echo "=========================koniec usuwania md5 bez pliku glownego====================================" >> "$log_file"
-
 
     if [ $((current_minute % 30)) -eq 0 ] && [ $current_minute -ne $last_summary_minute ]; then
         echo "================== Podsumowanie dnia $today ==================" >> "$log_file"
@@ -112,10 +157,11 @@ while true; do
         echo "=============================================================" >> "$log_file"
         log_table_header
 
-
         last_summary_minute=$current_minute
     fi
-
-
-    sleep 60
+    fi
+    # Inkrementacja licznika i resetowanie go po 12 iteracjach (12*5s = 60s)
+    md5_check_counter=$(( (md5_check_counter + 1) % 2 ))  # Reset co 60 sekund (12*5s = 60s)
+    main_operations_counter=$(( (main_operations_counter + 1) % 12 ))  # Reset co 60 sekund (12*5s = 60s)
+    sleep 5
 done
