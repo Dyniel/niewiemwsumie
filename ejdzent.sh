@@ -48,14 +48,16 @@ while (( "$#" )); do
   esac
 done
 
+
 touch "$log_file"
 
 # Usuwanie wszystkich plików poza 5 najnowszymi
 remove_all_but_latest_five() {
+    global total_deletions
+
     today=$(date +%Y_%m_%d)
     folder="/home/daniel/dump"
     pattern="dump_$today*"
-
     files_to_keep=$(find "$folder" -maxdepth 1 -name "$pattern" -type f ! -name "*.md5" -printf "%T@ %p\n" | sort -nr | head -n 5 | cut -d' ' -f2-)
     files_to_delete=$(find "$folder" -maxdepth 1 -name "$pattern" -type f ! -name "*.md5" | grep -Fvw "$files_to_keep")
 
@@ -66,7 +68,11 @@ remove_all_but_latest_five() {
     done
     echo "=========================koniec usuwania====================================" >> "$log_file"
 }
+
 check_md5_files() {
+    global total_md5_creations
+    global total_zabbix_send
+
     updated_files=()
     today=$(date +%Y_%m_%d)
     folder="/home/daniel/dump"
@@ -83,6 +89,7 @@ check_md5_files() {
                     echo "$current_md5" > "$md5_file"
                     log_with_timestamp "Zaktualizowano plik MD5 dla: $file"
                     updated_files+=("$file")
+                    log_with_timestamp "Wysyłanie pliku $file do Zabbix, ponieważ MD5 się różni."
                     send_to_zabbix "$file"
                 else
                     log_with_timestamp "MD5 dla pliku $file się nie różni. MD5: $old_md5"
@@ -91,6 +98,7 @@ check_md5_files() {
                 echo "$current_md5" > "$md5_file"
                 log_with_timestamp "Utworzono nowy plik MD5 dla: $file"
                 updated_files+=("$file")
+                log_with_timestamp "Wysyłanie pliku $file do Zabbix, ponieważ nie miał wcześniejszego pliku MD5."
                 send_to_zabbix "$file"
             fi
         fi
@@ -99,6 +107,8 @@ check_md5_files() {
 }
 
 send_to_zabbix() {
+    global total_zabbix_send
+
     file=$1
     size=$(stat -c%s "$file")
     md5=$(md5sum "$file" | awk '{print $1}')
