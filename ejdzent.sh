@@ -66,7 +66,6 @@ remove_all_but_latest_five() {
     done
     echo "=========================koniec usuwania====================================" >> "$log_file"
 }
-
 check_md5_files() {
     updated_files=()
     today=$(date +%Y_%m_%d)
@@ -84,6 +83,7 @@ check_md5_files() {
                     echo "$current_md5" > "$md5_file"
                     log_with_timestamp "Zaktualizowano plik MD5 dla: $file"
                     updated_files+=("$file")
+                    send_to_zabbix "$file"
                 else
                     log_with_timestamp "MD5 dla pliku $file się nie różni. MD5: $old_md5"
                 fi
@@ -91,10 +91,26 @@ check_md5_files() {
                 echo "$current_md5" > "$md5_file"
                 log_with_timestamp "Utworzono nowy plik MD5 dla: $file"
                 updated_files+=("$file")
+                send_to_zabbix "$file"
             fi
         fi
     done < <(find "$folder" -maxdepth 1 -type f -name "$pattern" ! -name "*.md5" -print0)
     echo "${updated_files[@]}"
+}
+
+send_to_zabbix() {
+    file=$1
+    size=$(stat -c%s "$file")
+    md5=$(md5sum "$file" | awk '{print $1}')
+    if [ $size -ne 0 ] && [ -n "$md5" ]; then
+        log_with_timestamp "Rozmiar i md5 pliku są prawidłowe: $file"
+        zabbix_response=$($command -vv -z $server -p $port -s $host -k $key -o $size)
+        log_with_timestamp "Odpowiedź Zabbix: $zabbix_response"
+        total_zabbix_send=$((total_zabbix_send + 1))
+        log_table_row
+    else
+        log_with_timestamp "Błąd: Rozmiar lub md5 pliku są nieprawidłowe: $file"
+    fi
 }
 
 md5_check_counter=0
