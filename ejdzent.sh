@@ -10,6 +10,7 @@ echo "Skrypt zarządzajacy archiwami v51.1.2.4. final koncowy FINAL.FINAL"
 #host=$zabbix_host
 #key=$zabbix_key_name
 
+# Inicjalizacja pliku logów
 log_file="./logfile.log"
 log_with_timestamp() {
   echo "$(date +"%Y-%m-%d %H:%M:%S") $1" >> "$log_file"
@@ -23,14 +24,12 @@ log_table_row() {
   echo -e "$(date +"%Y-%m-%d %H:%M:%S")\t$file\t\t$size\t$md5" >> "$log_file"
 }
 
+# Obsługa argumentów wejściowych
 while (( "$#" )); do
   case "$1" in
     --host|-h)
       host=$2
-      shift 2
-      ;;
-    --key|-k)
-      key=$2
+      key="${host}_dump"
       shift 2
       ;;
     --)
@@ -38,17 +37,23 @@ while (( "$#" )); do
       break
       ;;
     *)
-      echo "Błąd: Nieznany argument $1" >&2
+      log_with_timestamp "Błąd: Nieznany argument $1"
       exit 1
   esac
 done
 
+# Sprawdzenie czy wymagane zmienne konfiguracyjne są dostępne
+if [[ -z "$command" || -z "$server" || -z "$port" || -z "$host" ]]; then
+    log_with_timestamp "Błąd: Brak wymaganych zmiennych konfiguracyjnych."
+    exit 1
+fi
+
 touch "$log_file"
 
+# Funkcja usuwająca wszystkie pliki oprócz 5 najnowszych
 remove_all_but_latest_five() {
-    today=$(date +%Y_%m_%d)
     folder="/home/daniel/dump"
-    pattern="dump_$today*"
+    pattern="dump_*"  # Usuwam filtr daty
 
     # Lista plików posortowana od najstarszego do najnowszego
     mapfile -t sorted_files < <(find "$folder" -maxdepth 1 -name "$pattern" -type f ! -name "*.md5" -printf "%T@ %p\n" | sort -n | cut -d' ' -f2-)
@@ -66,12 +71,10 @@ remove_all_but_latest_five() {
 }
 
 
-
-
+# Funkcja sprawdzająca pliki MD5
 check_md5_files() {
-    today=$(date +%Y_%m_%d)
     folder="/home/daniel/dump"
-    pattern="dump_$today*"
+    pattern="dump_*"  # Usuwam filtr daty
 
     while IFS= read -r -d '' file; do
         if [[ "$file" != *.md5 ]]; then
@@ -103,6 +106,7 @@ check_md5_files() {
     done < <(find "$folder" -maxdepth 1 -type f -name "$pattern" ! -name "*.md5" -print0)
 }
 
+# Funkcja wysyłająca dane do Zabbix
 send_to_zabbix() {
     file=$1
     size=$(stat -c%s "$file")
@@ -131,6 +135,7 @@ while true; do
         folder="/home/daniel/dump"
         pattern="dump_$today*"
 
+        # Usuwanie plików MD5 bez odpowiadających im głównych plików
         find "$folder" -maxdepth 1 -name "$pattern.md5" -type f | while read -r md5_file; do
             main_file="${md5_file%.md5}"
             if [ ! -f "$main_file" ]; then
@@ -140,6 +145,7 @@ while true; do
             fi
         done
 
+        # Podsumowanie operacji
         echo "================== Podsumowanie dnia $today ==================" >> "$log_file"
         echo "Całkowita liczba plików: $total_files" >> "$log_file"
         echo "Całkowity rozmiar plików: $total_size bytes" >> "$log_file"
@@ -147,6 +153,9 @@ while true; do
         echo "Całkowita liczba operacji utworzenia MD5: $total_md5_creations" >> "$log_file"
         echo "Całkowita liczba operacji wysyłania do Zabbix: $total_zabbix_send" >> "$log_file"
         echo "=============================================================" >> "$log_file"
+        echo " ">> "$log_file"
+        echo "<---Koniec petli dziennej skryptu--->">> "$log_file"
+        echo " ">> "$log_file"
     fi
 
     main_operations_counter=$(( (main_operations_counter + 1) % 12 ))  # Reset co 60 sekund
