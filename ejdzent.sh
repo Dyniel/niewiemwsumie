@@ -10,9 +10,7 @@ echo "Skrypt zarządzajacy archiwami v51.1.2.4. final koncowy FINAL.FINAL"
 #host=$zabbix_host
 #key=$zabbix_key_name
 
-
 log_file="./logfile.log"
-
 log_with_timestamp() {
   echo "$(date +"%Y-%m-%d %H:%M:%S") $1" >> "$log_file"
 }
@@ -24,9 +22,6 @@ log_table_header() {
 log_table_row() {
   echo -e "$(date +"%Y-%m-%d %H:%M:%S")\t$file\t\t$size\t$md5" >> "$log_file"
 }
-
-# Inicjalizacja zmiennych
-last_summary_minute=-1
 
 while (( "$#" )); do
   case "$1" in
@@ -48,32 +43,32 @@ while (( "$#" )); do
   esac
 done
 
-
 touch "$log_file"
 
-# Usuwanie wszystkich plików poza 5 najnowszymi
 remove_all_but_latest_five() {
-    global total_deletions
-
     today=$(date +%Y_%m_%d)
     folder="/home/daniel/dump"
     pattern="dump_$today*"
-    files_to_keep=$(find "$folder" -maxdepth 1 -name "$pattern" -type f ! -name "*.md5" -printf "%T@ %p\n" | sort -nr | head -n 5 | cut -d' ' -f2-)
-    files_to_delete=$(find "$folder" -maxdepth 1 -name "$pattern" -type f ! -name "*.md5" | grep -Fvw "$files_to_keep")
 
-    echo "$files_to_delete" | while read -r file_to_delete; do
-        log_with_timestamp "Usunięcie pliku: $file_to_delete"
-        rm -f "$file_to_delete"
-        total_deletions=$((total_deletions + 1))
-    done
-    echo "=========================koniec usuwania====================================" >> "$log_file"
+    # Lista plików posortowana od najstarszego do najnowszego
+    mapfile -t sorted_files < <(find "$folder" -maxdepth 1 -name "$pattern" -type f ! -name "*.md5" -printf "%T@ %p\n" | sort -n | cut -d' ' -f2-)
+
+    # Usuń wszystkie pliki poza 5 najnowszymi
+    if [ ${#sorted_files[@]} -gt 5 ]; then
+        for ((i=0; i < ${#sorted_files[@]} - 5; i++)); do
+            file="${sorted_files[$i]}"
+            log_with_timestamp "Usunięcie pliku: $file"
+            rm -f "$file"
+            total_deletions=$((total_deletions + 1))
+        done
+    fi
+    log_with_timestamp "Zakończono usuwanie starych plików."
 }
 
-check_md5_files() {
-    global total_md5_creations
-    global total_zabbix_send
 
-    updated_files=()
+
+
+check_md5_files() {
     today=$(date +%Y_%m_%d)
     folder="/home/daniel/dump"
     pattern="dump_$today*"
@@ -82,48 +77,42 @@ check_md5_files() {
         if [[ "$file" != *.md5 ]]; then
             md5_file="$file.md5"
             current_md5=$(md5sum "$file" | awk '{print $1}')
+
+            # Update total_files and total_size here
+            total_files=$((total_files + 1))
+            total_size=$((total_size + $(stat -c%s "$file")))
+
             if [[ -f $md5_file ]]; then
                 old_md5=$(cat "$md5_file")
                 if [[ "$old_md5" != "$current_md5" ]]; then
                     log_with_timestamp "Błąd: MD5 dla pliku $file się różni. Stary MD5: $old_md5, Nowy MD5: $current_md5"
                     echo "$current_md5" > "$md5_file"
+                    total_md5_creations=$((total_md5_creations + 1))
                     log_with_timestamp "Zaktualizowano plik MD5 dla: $file"
-                    updated_files+=("$file")
-                    log_with_timestamp "Wysyłanie pliku $file do Zabbix, ponieważ MD5 się różni."
                     send_to_zabbix "$file"
                 else
-                    log_with_timestamp "MD5 dla pliku $file się nie różni. MD5: $old_md5"
+                    log_with_timestamp "MD5 dla pliku $file jest aktualne."
                 fi
             else
                 echo "$current_md5" > "$md5_file"
+                total_md5_creations=$((total_md5_creations + 1))
                 log_with_timestamp "Utworzono nowy plik MD5 dla: $file"
-                updated_files+=("$file")
-                log_with_timestamp "Wysyłanie pliku $file do Zabbix, ponieważ nie miał wcześniejszego pliku MD5."
                 send_to_zabbix "$file"
             fi
         fi
     done < <(find "$folder" -maxdepth 1 -type f -name "$pattern" ! -name "*.md5" -print0)
-    echo "${updated_files[@]}"
 }
 
 send_to_zabbix() {
-    global total_zabbix_send
-
     file=$1
     size=$(stat -c%s "$file")
     md5=$(md5sum "$file" | awk '{print $1}')
-    if [ $size -ne 0 ] && [ -n "$md5" ]; then
-        log_with_timestamp "Rozmiar i md5 pliku są prawidłowe: $file"
-        zabbix_response=$($command -vv -z $server -p $port -s $host -k $key -o $size)
-        log_with_timestamp "Odpowiedź Zabbix: $zabbix_response"
-        total_zabbix_send=$((total_zabbix_send + 1))
-        log_table_row
-    else
-        log_with_timestamp "Błąd: Rozmiar lub md5 pliku są nieprawidłowe: $file"
-    fi
+    log_with_timestamp "Wysyłanie do Zabbix: Rozmiar pliku $file to $size, MD5 to $md5"
+    zabbix_response=$($command -vv -z $server -p $port -s $host -k $key -o $size)
+    log_with_timestamp "Odpowiedź Zabbix: $zabbix_response"
+    total_zabbix_send=$((total_zabbix_send + 1))
 }
 
-md5_check_counter=0
 main_operations_counter=0
 
 while true; do
@@ -135,33 +124,12 @@ while true; do
     total_zabbix_send=0
 
     if [ $main_operations_counter -eq 0 ]; then
-        # Najpierw usuń pliki do 5 głównych
         remove_all_but_latest_five
-
-        # Następnie twórz i sprawdzaj pliki MD5
-        files_to_process=($(check_md5_files))
+        check_md5_files
 
         today=$(date +%Y_%m_%d)
         folder="/home/daniel/dump"
         pattern="dump_$today*"
-
-        for file in "${files_to_process[@]}"; do
-            if [ -f "$file" ]; then
-                size=$(stat -c%s "$file")
-                md5=$(md5sum "$file" | awk '{print $1}')
-                if [ $size -ne 0 ] && [ -n "$md5" ]; then
-                    log_with_timestamp "Rozmiar i md5 pliku są prawidłowe: $file"
-                    zabbix_response=$($command -vv -z $server -p $port -s $host -k $key -o $size)
-                    log_with_timestamp "Odpowiedź Zabbix: $zabbix_response"
-                    total_zabbix_send=$((total_zabbix_send + 1))
-                    log_table_row
-                else
-                    log_with_timestamp "Błąd: Rozmiar lub md5 pliku są nieprawidłowe: $file"
-                fi
-            fi
-        done
-
-        echo "=========================koniec md5====================================" >> "$log_file"
 
         find "$folder" -maxdepth 1 -name "$pattern.md5" -type f | while read -r md5_file; do
             main_file="${md5_file%.md5}"
@@ -171,7 +139,6 @@ while true; do
                 total_deletions=$((total_deletions + 1))
             fi
         done
-        echo "=========================koniec usuwania md5 bez pliku glownego====================================" >> "$log_file"
 
         echo "================== Podsumowanie dnia $today ==================" >> "$log_file"
         echo "Całkowita liczba plików: $total_files" >> "$log_file"
@@ -180,11 +147,8 @@ while true; do
         echo "Całkowita liczba operacji utworzenia MD5: $total_md5_creations" >> "$log_file"
         echo "Całkowita liczba operacji wysyłania do Zabbix: $total_zabbix_send" >> "$log_file"
         echo "=============================================================" >> "$log_file"
-        log_table_header
     fi
 
-    # Inkrementacja licznika i resetowanie go po 12 iteracjach (12*5s = 60s)
-    md5_check_counter=$(( (md5_check_counter + 1) % 2 ))  # Reset co 60 sekund (12*5s = 60s)
-    main_operations_counter=$(( (main_operations_counter + 1) % 12 ))  # Reset co 60 sekund (12*5s = 60s)
+    main_operations_counter=$(( (main_operations_counter + 1) % 12 ))  # Reset co 60 sekund
     sleep 5
 done
