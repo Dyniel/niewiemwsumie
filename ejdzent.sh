@@ -108,11 +108,10 @@ check_md5_files() {
 
 # Funkcja wysyłająca dane do Zabbix
 send_to_zabbix() {
-    file=$1
-    size=$(stat -c%s "$file")
-    md5=$(md5sum "$file" | awk '{print $1}')
-    log_with_timestamp "Wysyłanie do Zabbix: Rozmiar pliku $file to $size, MD5 to $md5"
-    zabbix_response=$($command -vv -z $server -p $port -s $host -k $key -o $size)
+    folder="/home/daniel/dump"
+    total_size=$(du -sb "$folder" | cut -f1)
+    log_with_timestamp "Wysyłanie do Zabbix: Całkowity rozmiar folderu to $total_size"
+    zabbix_response=$($command -vv -z $server -p $port -s $host -k $key -o $total_size)
     log_with_timestamp "Odpowiedź Zabbix: $zabbix_response"
     total_zabbix_send=$((total_zabbix_send + 1))
 }
