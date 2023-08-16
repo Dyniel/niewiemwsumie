@@ -1,7 +1,7 @@
 #!/bin/bash
 source config_bash.ini
 
-echo "skrypt uruchiomiiony"
+echo "Skrypt zarządzajacy archiwami v51.1.2.4. final koncowy FINAL.FINAL"
 
 ###opcja bez używania komendy, tylko standalone skrypt
 #command=$command
@@ -50,6 +50,23 @@ done
 
 touch "$log_file"
 
+# Usuwanie wszystkich plików poza 5 najnowszymi
+remove_all_but_latest_five() {
+    today=$(date +%Y_%m_%d)
+    folder="/home/daniel/dump"
+    pattern="dump_$today*"
+
+    files_to_keep=$(find "$folder" -maxdepth 1 -name "$pattern" -type f ! -name "*.md5" -printf "%T@ %p\n" | sort -nr | head -n 5 | cut -d' ' -f2-)
+    files_to_delete=$(find "$folder" -maxdepth 1 -name "$pattern" -type f ! -name "*.md5" | grep -Fvw "$files_to_keep")
+
+    echo "$files_to_delete" | while read -r file_to_delete; do
+        log_with_timestamp "Usunięcie pliku: $file_to_delete"
+        rm -f "$file_to_delete"
+        total_deletions=$((total_deletions + 1))
+    done
+    echo "=========================koniec usuwania====================================" >> "$log_file"
+}
+
 check_md5_files() {
     updated_files=()
     today=$(date +%Y_%m_%d)
@@ -91,11 +108,13 @@ while true; do
     total_md5_creations=0
     total_zabbix_send=0
 
-    if [ $md5_check_counter -eq 0 ]; then
-        files_to_process=($(check_md5_files))
-    fi
-
     if [ $main_operations_counter -eq 0 ]; then
+        # Najpierw usuń pliki do 5 głównych
+        remove_all_but_latest_five
+
+        # Następnie twórz i sprawdzaj pliki MD5
+        files_to_process=($(check_md5_files))
+
         today=$(date +%Y_%m_%d)
         folder="/home/daniel/dump"
         pattern="dump_$today*"
@@ -116,17 +135,17 @@ while true; do
             fi
         done
 
-    echo "=========================koniec md5====================================" >> "$log_file"
+        echo "=========================koniec md5====================================" >> "$log_file"
 
-    find "$folder" -maxdepth 1 -name "$pattern.md5" -type f | while read -r md5_file; do
-        main_file="${md5_file%.md5}"
-        if [ ! -f "$main_file" ]; then
-            log_with_timestamp "Usunięcie pliku md5 bez pliku głównego: $md5_file"
-            rm -f "$md5_file"
-            total_deletions=$((total_deletions + 1))
-        fi
-    done
-    echo "=========================koniec usuwania md5 bez pliku glownego====================================" >> "$log_file"
+        find "$folder" -maxdepth 1 -name "$pattern.md5" -type f | while read -r md5_file; do
+            main_file="${md5_file%.md5}"
+            if [ ! -f "$main_file" ]; then
+                log_with_timestamp "Usunięcie pliku md5 bez pliku głównego: $md5_file"
+                rm -f "$md5_file"
+                total_deletions=$((total_deletions + 1))
+            fi
+        done
+        echo "=========================koniec usuwania md5 bez pliku glownego====================================" >> "$log_file"
 
         echo "================== Podsumowanie dnia $today ==================" >> "$log_file"
         echo "Całkowita liczba plików: $total_files" >> "$log_file"
@@ -136,8 +155,8 @@ while true; do
         echo "Całkowita liczba operacji wysyłania do Zabbix: $total_zabbix_send" >> "$log_file"
         echo "=============================================================" >> "$log_file"
         log_table_header
-
     fi
+
     # Inkrementacja licznika i resetowanie go po 12 iteracjach (12*5s = 60s)
     md5_check_counter=$(( (md5_check_counter + 1) % 2 ))  # Reset co 60 sekund (12*5s = 60s)
     main_operations_counter=$(( (main_operations_counter + 1) % 12 ))  # Reset co 60 sekund (12*5s = 60s)
