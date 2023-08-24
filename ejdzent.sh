@@ -16,14 +16,6 @@ log_with_timestamp() {
   echo "$(date +"%Y-%m-%d %H:%M:%S") $1" >> "$log_file"
 }
 
-log_table_header() {
-  echo -e "Date\t\tFile Name\t\tSize (bytes)\tMD5" >> "$log_file"
-}
-
-log_table_row() {
-  echo -e "$(date +"%Y-%m-%d %H:%M:%S")\t$file\t\t$size\t$md5" >> "$log_file"
-}
-
 # Obsługa argumentów wejściowych
 while (( "$#" )); do
   case "$1" in
@@ -70,7 +62,6 @@ remove_all_but_latest_five() {
     log_with_timestamp "Zakończono usuwanie starych plików."
 }
 
-
 # Funkcja sprawdzająca pliki MD5
 check_md5_files() {
     folder="/home/daniel/dump"
@@ -116,8 +107,32 @@ send_to_zabbix() {
     total_zabbix_send=$((total_zabbix_send + 1))
 }
 
+# Funkcja sprawdzająca, czy pojawił się nowy plik główny z dzisiejszą datą
+check_for_new_file_today() {
+    folder="/home/daniel/dump"
+    today=$(date +%Y_%m_%d)
+    pattern="dump_$today*"
+    files_today=$(find "$folder" -maxdepth 1 -name "$pattern" ! -name "*.md5")
+    if [ ! -z "$files_today" ]; then
+        log_with_timestamp "Znaleziono nowy plik główny z datą $today."
+    else
+        log_with_timestamp "Brak nowego pliku głównego z datą $today."
+    fi
+}
+
 main_operations_counter=0
 
+remove_orphaned_md5() {
+    folder="/home/daniel/dump"
+    pattern="dump_*.md5"
+    find "$folder" -maxdepth 1 -name "$pattern" -type f | while read -r md5_file; do
+        main_file="${md5_file%.md5}"
+        if [ ! -f "$main_file" ]; then
+            log_with_timestamp "Usunięcie pliku md5 bez pliku głównego: $md5_file"
+            rm -f "$md5_file"
+        fi
+    done
+}
 while true; do
     # Resetowanie zmiennych podsumowania
     total_files=0
@@ -127,23 +142,15 @@ while true; do
     total_zabbix_send=0
 
     if [ $main_operations_counter -eq 0 ]; then
+        check_for_new_file_today
         remove_all_but_latest_five
         check_md5_files
+        remove_orphaned_md5
+
 
         today=$(date +%Y_%m_%d)
         folder="/home/daniel/dump"
         pattern="dump_$today*"
-
-        # Usuwanie plików MD5 bez odpowiadających im głównych plików
-        find "$folder" -maxdepth 1 -name "$pattern.md5" -type f | while read -r md5_file; do
-            main_file="${md5_file%.md5}"
-            if [ ! -f "$main_file" ]; then
-                log_with_timestamp "Usunięcie pliku md5 bez pliku głównego: $md5_file"
-                rm -f "$md5_file"
-                total_deletions=$((total_deletions + 1))
-            fi
-        done
-
         # Podsumowanie operacji
         echo "================== Podsumowanie dnia $today ==================" >> "$log_file"
         echo "Całkowita liczba plików: $total_files" >> "$log_file"
