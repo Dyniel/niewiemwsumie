@@ -1,46 +1,41 @@
 #!/bin/bash
-source config_bash.ini
 
-echo "Skrypt zarządzajacy archiwami v51.1.2.4. final koncowy FINAL.FINAL"
-
-###opcja bez używania komendy, tylko standalone skrypt
-#command=$command
-#server=$server
-#port=$port
-#host=$zabbix_host
-#key=$zabbix_key_name
-
-# Inicjalizacja pliku logów
-log_file="./logfile.log"
 log_with_timestamp() {
   echo "$(date +"%Y-%m-%d %H:%M:%S") $1" >> "$log_file"
 }
 
+# Inicjalizacja
+initialize() {
+    source config_bash.ini
+    echo "Skrypt zarządzajacy archiwami v51.1.2.4. final koncowy FINAL.FINAL"
+    log_file="./logfile.log"
+    touch "$log_file"
+}
+
 # Obsługa argumentów wejściowych
-while (( "$#" )); do
-  case "$1" in
-    --host|-h)
-      host=$2
-      key="${host}_dump"
-      shift 2
-      ;;
-    --)
-      shift
-      break
-      ;;
-    *)
-      log_with_timestamp "Błąd: Nieznany argument $1"
-      exit 1
-  esac
-done
+handle_arguments() {
+    while (( "$#" )); do
+        case "$1" in
+            --host|-h)
+                host=$2
+                key="${host}_dump"
+                shift 2
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                log_with_timestamp "Błąd: Nieznany argument $1"
+                exit 1
+        esac
+    done
 
-# Sprawdzenie czy wymagane zmienne konfiguracyjne są dostępne
-if [[ -z "$command" || -z "$server" || -z "$port" || -z "$host" ]]; then
-    log_with_timestamp "Błąd: Brak wymaganych zmiennych konfiguracyjnych."
-    exit 1
-fi
-
-touch "$log_file"
+    if [[ -z "$command" || -z "$server" || -z "$port" || -z "$host" ]]; then
+        log_with_timestamp "Błąd: Brak wymaganych zmiennych konfiguracyjnych."
+        exit 1
+    fi
+}
 
 # Funkcja usuwająca wszystkie pliki oprócz 5 najnowszych
 remove_all_but_latest_five() {
@@ -120,7 +115,6 @@ check_for_new_file_today() {
     fi
 }
 
-main_operations_counter=0
 
 remove_orphaned_md5() {
     folder="/home/daniel/dump"
@@ -133,20 +127,17 @@ remove_orphaned_md5() {
         fi
     done
 }
-while true; do
-    # Resetowanie zmiennych podsumowania
-    total_files=0
-    total_size=0
-    total_deletions=0
-    total_md5_creations=0
-    total_zabbix_send=0
 
-    if [ $main_operations_counter -eq 0 ]; then
+# Główna funkcja
+main() {
+    initialize
+    handle_arguments
+
+    while true; do
         check_for_new_file_today
         remove_all_but_latest_five
         check_md5_files
         remove_orphaned_md5
-
 
         today=$(date +%Y_%m_%d)
         folder="/home/daniel/dump"
@@ -162,8 +153,11 @@ while true; do
         echo " ">> "$log_file"
         echo "<---Koniec petli dziennej skryptu--->">> "$log_file"
         echo " ">> "$log_file"
-    fi
 
-    main_operations_counter=$(( (main_operations_counter + 1) % 12 ))  # Reset co 60 sekund
-    sleep 5
-done
+        sleep 60  # Czekaj jedną minutę przed ponownym wykonaniem operacji
+    done
+}
+
+
+# Uruchom główną funkcję
+main

@@ -11,6 +11,18 @@ read_config() {
     sed -n "/\[$section\]/,/\[.*\]/p" $config_file | sed -e "1d" -e "/^\[.*\]$/d"
 }
 
+update_config() {
+    local section=$1
+    local action=$2
+    local value=$3
+
+    if [ "$action" == "add" ]; then
+        echo "$value" >> $config_file
+    elif [ "$action" == "remove" ]; then
+        sed -i "/$value/d" $config_file
+    fi
+}
+
 scripts=($(read_config "Scripts"))
 hosts=($(read_config "Hosts"))
 
@@ -61,29 +73,55 @@ refresh_running_scripts() {
 
 while true; do
     # Okno dialogowe na początku
-    choice=$(zenity --list --title="Wybór akcji" --column="Akcje" "Rozpocznij nowy skrypt" "Zakończ działający skrypt" "Dodaj nowy skrypt" "Dodaj nowy host" "Pokaż logi" "Zagraj w Kamień, Papier, Nożyce" )
+    choice=$(zenity --list --title="Wybór akcji" --column="Akcje" "Rozpocznij nowy skrypt" "Zakończ działający skrypt" "Dodaj nowy skrypt" "Dodaj nowy host" "Pokaż logi" "Usuń skrypt" "Usuń hosta" "Zagraj w Kamień, Papier, Nożyce" )
     # Jeśli użytkownik anuluje wybór, zakończ skrypt
     if [ -z "$choice" ]; then
         exit 1
     fi
 
+
     if [ "$choice" == "Dodaj nowy skrypt" ]; then
         new_script=$(zenity --entry --title="Dodaj nowy skrypt" --text="Podaj ścieżkę do skryptu:")
         if [ -n "$new_script" ]; then
-            scripts+=("$new_script")
+            update_config "Scripts" "add" "$new_script"
+            scripts=($(read_config "Scripts"))
             zenity --info --text="Dodano nowy skrypt: $new_script"
         fi
         continue
     fi
 
+
     if [ "$choice" == "Dodaj nowy host" ]; then
         new_host=$(zenity --entry --title="Dodaj nowy host" --text="Podaj nazwę hosta:")
         if [ -n "$new_host" ]; then
-            hosts+=("$new_host")
+            update_config "Hosts" "add" "$new_host"
+            hosts=($(read_config "Hosts"))
             zenity --info --text="Dodano nowy host: $new_host"
         fi
         continue
     fi
+
+
+    if [ "$choice" == "Usuń skrypt" ]; then
+        script_to_remove=$(zenity --list --title="Usuń skrypt" --column="Skrypty" "${scripts[@]}")
+        if [ -n "$script_to_remove" ]; then
+            update_config "Scripts" "remove" "$script_to_remove"
+            scripts=($(read_config "Scripts"))
+            zenity --info --text="Usunięto skrypt: $script_to_remove"
+        fi
+        continue
+    fi
+
+    if [ "$choice" == "Usuń hosta" ]; then
+        host_to_remove=$(zenity --list --title="Usuń hosta" --column="Hosty" "${hosts[@]}")
+        if [ -n "$host_to_remove" ]; then
+            update_config "Hosts" "remove" "$host_to_remove"
+            hosts=($(read_config "Hosts"))
+            zenity --info --text="Usunięto hosta: $host_to_remove"
+        fi
+        continue
+    fi
+
 
     if [ "$choice" == "Zakończ działający skrypt" ]; then
         refresh_running_scripts
