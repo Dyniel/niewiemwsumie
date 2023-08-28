@@ -152,7 +152,7 @@ while true; do
         folder="/home/daniel/dump"
         pattern="dump_$today*"
         # Podsumowanie operacji
-        echo "================== Podsumowanie dnia $today ==================" >> "$log_file"
+        echo "================== Podsumowanie dnia $today dla $host==================" >> "$log_file"
         echo "Całkowita liczba plików: $total_files" >> "$log_file"
         echo "Całkowity rozmiar plików: $total_size bytes" >> "$log_file"
         echo "Całkowita liczba operacji usunięcia: $total_deletions" >> "$log_file"
